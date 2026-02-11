@@ -68,5 +68,26 @@ async def get_balance_summary(balance_id: str) -> dict:
         except httpx.RequestError as e:
             return {"error": "Connection to balance service failed"}
 
+@mcp.tool()
+async def get_network_status_per_region(region: str) -> dict:
+    """
+    Get the network status for a specific region.
+    """
+    url = f"{TURKCELL_API_BASE}/api/v1/troubleshooting/network-status/region/{region}"
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.get(
+                url,
+                headers=TURKCELL_HEADERS
+            )
+            response.raise_for_status()
+            return response.json()
+
+        except httpx.HTTPStatusError as e:
+            return {"error": f"Network status retrieval failed: {e.response.status_code}"}
+        except httpx.RequestError as e:
+            return {"error": "Connection to network status service failed"}
+
 if __name__ == "__main__":
     mcp.run()
