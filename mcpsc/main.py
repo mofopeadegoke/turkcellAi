@@ -1,42 +1,49 @@
-"""MCPServer quickstart example.
-
-Run from the repository root:
-    uv run examples/snippets/servers/mcpserver_quickstart.py
-"""
-
-from mcp.server.mcpserver import MCPServer
+from mcp.server.fastmcp import FastMCP
+import httpx
+from typing import Optional
 
 # Create an MCP server
-mcp = MCPServer("Demo")
+mcp = FastMCP("Turkcell AI MCP Server")
 
+# Constants for API configuration
+TURKCELL_API_BASE = "https://turkcellaiapi.onrender.com"
+TURKCELL_HEADERS = {
+    "X-API-KEY": "turkcell_key_12345*",
+    "Content-Type": "application/json"
+}
 
-# Add an addition tool
 @mcp.tool()
-def add(a: int, b: int) -> int:
-    """Add two numbers"""
-    return a + b
+async def lookup_customer(
+    phone: Optional[str] = None, 
+    passport: Optional[str] = None
+) -> dict:
+    """
+    Identify a customer using their WhatsApp/phone number or passport number.
+    Required for identifying tourists and accessing their specific records.
+    """
+    if not phone and not passport:
+        return {"error": "Provide either a phone number or a passport number."}
 
+    url = f"{TURKCELL_API_BASE}/api/v1/customers/lookup"
+    params = {k: v for k, v in {"phone": phone, "passport": passport}.items() if v}
 
-# Add a dynamic greeting resource
-@mcp.resource("greeting://{name}")
-def get_greeting(name: str) -> str:
-    """Get a personalized greeting"""
-    return f"Hello, {name}!"
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            # We pass the TURKCELL_HEADERS here
+            response = await client.get(
+                url, 
+                params=params, 
+                headers=TURKCELL_HEADERS
+            )
+            response.raise_for_status()
+            return response.json()
+            
+        except httpx.HTTPStatusError as e:
+            return {"error": f"Lookup failed: {e.response.status_code}", "details": e.response.text}
+        except httpx.RequestError as e:
+            return {"error": "Network error", "details": str(e)}
 
+# ... (Rest of your prompts and resources)
 
-# Add a prompt
-@mcp.prompt()
-def greet_user(name: str, style: str = "friendly") -> str:
-    """Generate a greeting prompt"""
-    styles = {
-        "friendly": "Please write a warm, friendly greeting",
-        "formal": "Please write a formal, professional greeting",
-        "casual": "Please write a casual, relaxed greeting",
-    }
-
-    return f"{styles.get(style, styles['friendly'])} for someone named {name}."
-
-
-# Run with streamable HTTP transport
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http", json_response=True)
+    mcp.run()
