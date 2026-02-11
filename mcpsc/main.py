@@ -43,7 +43,30 @@ async def lookup_customer(
         except httpx.RequestError as e:
             return {"error": "Network error", "details": str(e)}
 
-# ... (Rest of your prompts and resources)
+@mcp.tool()
+async def get_balance_summary(balance_id: str) -> dict:
+    """
+    Get a detailed summary of a specific balance ID.
+    Returns remaining data (GB), minutes, and SMS counts.
+    """
+    # Note: Using the balance_id specifically as required by the teammate's endpoint
+    url = f"{TURKCELL_API_BASE}/api/v1/balances/{balance_id}/summary"
+    
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.get(
+                url, 
+                headers=TURKCELL_HEADERS
+            )
+            response.raise_for_status()
+            
+            # This will return fields like {"data_remaining": 5.2, "unit": "GB", ...}
+            return response.json()
+            
+        except httpx.HTTPStatusError as e:
+            return {"error": f"Balance retrieval failed: {e.response.status_code}"}
+        except httpx.RequestError as e:
+            return {"error": "Connection to balance service failed"}
 
 if __name__ == "__main__":
     mcp.run()
