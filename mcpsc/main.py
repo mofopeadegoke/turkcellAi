@@ -89,5 +89,54 @@ async def get_network_status_per_region(region: str) -> dict:
         except httpx.RequestError as e:
             return {"error": "Connection to network status service failed"}
 
+
+@mcp.tool()
+async def recommend_package(
+    budget_try: Optional[float] = None,
+    min_data_gb: Optional[int] = None,
+    duration_days: Optional[int] = None,
+    package_type: str = "TOURIST"
+) -> dict:
+    """
+    Recommend the best mobile package based on the customer's specific needs.
+    Useful when a user asks 'Which plan is best for me?' or mentions a budget.
+    
+    Args:
+        budget_try: Maximum amount the user wants to spend in TRY.
+        min_data_gb: Minimum amount of data (in GB) required.
+        duration_days: Length of stay in Turkey (e.g., 7, 30).
+        package_type: "TOURIST" (default), "PREPAID", or "POSTPAID".
+    """
+    url = f"{TURKCELL_API_BASE}/api/v1/packages/search/recommend"
+    
+    # Dynamically build the query parameters
+    # This ensures we don't send "None" values to the API
+    params = {
+        "package_type": package_type
+    }
+    if budget_try is not None:
+        params["budget_try"] = budget_try
+    if min_data_gb is not None:
+        params["min_data_gb"] = min_data_gb
+    if duration_days is not None:
+        params["duration_days"] = duration_days
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.get(
+                url, 
+                params=params, 
+                headers=TURKCELL_HEADERS
+            )
+            response.raise_for_status()
+            
+            # Returns a list of recommended packages with reasoning
+            return response.json()
+            
+        except httpx.HTTPStatusError as e:
+            return {"error": f"Recommendation failed: {e.response.status_code}", "details": e.response.text}
+        except httpx.RequestError as e:
+            return {"error": "Connection failed", "details": str(e)}
+
 if __name__ == "__main__":
     mcp.run()
