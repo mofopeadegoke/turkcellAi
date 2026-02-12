@@ -138,5 +138,36 @@ async def recommend_package(
         except httpx.RequestError as e:
             return {"error": "Connection failed", "details": str(e)}
 
+
+@mcp.tool()
+async def search_knowledge_base(query: str) -> str:
+    """
+    Search the Turkcell internal knowledge base for technical guides, 
+    troubleshooting steps, and official procedures.
+    Use this when the user has a technical issue like 'no internet' or 'APN settings'.
+    """
+    url = f"{TURKCELL_API_BASE}/api/v1/troubleshooting/knowledge-base/search"
+    
+    # POST body containing the search query
+    payload = {"query": query}
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            # We use client.post for this endpoint
+            response = await client.post(
+                url,
+                json=payload,
+                headers=TURKCELL_HEADERS
+            )
+            response.raise_for_status()
+            
+            # Returns the raw search results as a string for the AI to process
+            return response.text
+            
+        except httpx.HTTPStatusError as e:
+            return f"Search failed (Error {e.response.status_code}): {e.response.text}"
+        except httpx.RequestError as e:
+            return f"Knowledge base is currently unreachable: {str(e)}"
+
 if __name__ == "__main__":
     mcp.run()
