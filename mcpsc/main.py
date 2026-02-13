@@ -138,7 +138,7 @@ async def recommend_package(
         except httpx.RequestError as e:
             return {"error": "Connection failed", "details": str(e)}
 
-
+#   Not the most optimal tool yet
 @mcp.tool()
 async def search_knowledge_base(query: str) -> str:
     """
