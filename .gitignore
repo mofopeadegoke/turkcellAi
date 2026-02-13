@@ -1,2 +1,7 @@
 /turkcell
 .env
+add_Ayo_num.py
+fix_openai_client.py
+monitor_db.py
+seed_database.py
+test_connection.py
