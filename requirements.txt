@@ -1,18 +1,20 @@
 # --- Web Server ---
 flask==3.0.0
-gunicorn==21.2.0          # Required for Railway to run Flask reliably
+gunicorn==21.2.0
 
 # --- AI & Communications ---
-openai==1.10.0
+# CRITICAL FIX: Upgraded from 1.10.0 to 1.50.0+ to fix the 'proxies' error
+openai>=1.50.0
 twilio==8.11.0
-pydub==0.25.1             # Required for the audio/voice processing logic
+pydub==0.25.1
 
 # --- MCP (Model Context Protocol) ---
-fastmcp>=0.4.1            # The framework you're using for your tools
-httpx>=0.27.0             # Async HTTP client required for your MCP tools
-mcp[cli]>=1.2.0           # Official MCP SDK
+fastmcp>=0.4.1
+# Pin httpx to a version that plays nice with everyone
+httpx>=0.27.0,<0.28.0
+mcp[cli]>=1.2.0
 
 # --- Database & Environment ---
-psycopg2-binary           # The bridge between Python and your Supabase DB
+psycopg2-binary
 python-dotenv==1.0.0
 requests==2.31.0
