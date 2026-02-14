@@ -6,7 +6,7 @@ from app.database import (
     get_customer_by_phone, 
     log_interaction
 )
-from app.intelligence.intelligence_client import IntelligenceClient
+from intelligence.intelligence_client import IntelligenceClient
 from datetime import datetime
 import uuid
 import asyncio
