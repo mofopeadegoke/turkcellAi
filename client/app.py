@@ -9,7 +9,7 @@ from mcp.client.session import ClientSession
 
 # --- Configuration ---
 load_dotenv()  # Load environment variables from .env file
-OPENAI_API_KEY = os.getenv("openai_api_key")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SERVER_PATH = "../mcpsc/main.py" 
 
 st.set_page_config(page_title="Turkcell AI Support", page_icon="🇹🇷")
