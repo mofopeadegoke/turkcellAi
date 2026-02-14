@@ -1,2 +1,2 @@
-web: gunicorn main:app
+web: export PYTHONPATH=$PYTHONPATH:. && gunicorn main:app
 mcp: python mcpsc/main.py
