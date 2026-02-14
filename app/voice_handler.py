@@ -7,7 +7,7 @@ from datetime import datetime
 import uuid
 from openai import OpenAI
 import asyncio
-from app.intelligence.intelligence_client import IntelligenceClient
+from intelligence.intelligence_client import IntelligenceClient
 
 #global client
 ai_client = IntelligenceClient(
