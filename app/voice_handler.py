@@ -2,14 +2,21 @@ from flask import request, Response
 from twilio.twiml.voice_response import VoiceResponse, Gather
 import json
 from app.config import Config
-from app.database import get_customer_by_phone, log_interaction
+from app.database import (
+    get_customer_by_phone,
+    log_interaction,
+    search_knowledge_base,
+    check_network_issues,
+    get_full_customer_profile,
+    create_support_ticket
+)
 from datetime import datetime
 import uuid
 from openai import OpenAI
 import asyncio
 from intelligence.intelligence_client import IntelligenceClient
 
-#global client
+# Global client
 ai_client = IntelligenceClient(
     openai_api_key=Config.OPENAI_API_KEY,
     mcp_server_path=Config.MCP_SERVER_PATH,
@@ -18,65 +25,74 @@ ai_client = IntelligenceClient(
 
 # Conversation memory
 conversation_memory = {}
-# def get_openai_client():
-#     # """Lazy load OpenAI client"""
-#     # from openai import OpenAI
-#     # return OpenAI(api_key=Config.OPENAI_API_KEY)
-#     """Lazy load OpenAI client to avoid initialization errors"""
-#     import openai
-#     import os
-    
-#     # For Python 3.14 compatibility - use environment variable instead
-#     os.environ['OPENAI_API_KEY'] = Config.OPENAI_API_KEY
-    
-#     # Simple initialization without extra parameters
-#     return openai.OpenAI()
 
 def get_openai_client():
     return OpenAI(api_key=Config.OPENAI_API_KEY)
 
 
+def get_polly_voice(language, gender='female'):
+    """Get the best Amazon Polly neural voice for the given language"""
+    voices = {
+        'EN': {'female': 'Polly.Joanna', 'male': 'Polly.Matthew'},
+        'TR': {'female': 'Polly.Filiz', 'male': 'Polly.Filiz'},
+        'AR': {'female': 'Polly.Zeina', 'male': 'Polly.Zeina'},
+        'DE': {'female': 'Polly.Vicki', 'male': 'Polly.Hans'},
+        'RU': {'female': 'Polly.Tatyana', 'male': 'Polly.Maxim'}
+    }
+    return voices.get(language, voices['EN']).get(gender, voices['EN']['female'])
+
+
 def get_customer_info(phone_number):
-    """Lookup customer from Supabase database"""
-    print(f"🔍 Looking up phone: {phone_number}")
+    """
+    Lookup customer from API (instead of direct database access)
     
-    customer = get_customer_by_phone(phone_number)
+    This now uses the live API endpoints
+    """
+    print(f"🔍 Looking up customer via API: {phone_number}")
     
-    if customer and customer['customer_id']:
+    # Use the full profile function for complete data
+    profile = get_full_customer_profile(phone_number)
+    
+    if profile and profile.get('customer_id'):
         # Calculate days remaining
         days_remaining = 0
-        if customer['expiry_date']:
-            days_remaining = (customer['expiry_date'] - datetime.now()).days
+        subscription = profile.get('subscription')
+        
+        if subscription and subscription.get('expiry_date'):
+            expiry_date = datetime.fromisoformat(subscription['expiry_date'].replace('Z', '+00:00'))
+            days_remaining = (expiry_date - datetime.now()).days
             days_remaining = max(0, days_remaining)
         
-        print(f"✅ Customer found in database: {customer['full_name']}")
+        print(f"✅ Customer found via API: {profile['full_name']}")
+        
+        balance = profile.get('balance', {})
         
         return {
-            "customer_id": str(customer['customer_id']),
-            "name": customer['full_name'],
-            "language": customer['preferred_language'],
-            "phone": customer['whatsapp_number'] or customer['msisdn'],
+            "customer_id": str(profile['customer_id']),
+            "name": profile['full_name'],
+            "language": profile.get('preferred_language', 'EN'),
+            "phone": profile.get('whatsapp_number') or subscription.get('msisdn') if subscription else phone_number,
             "package": {
-                "type": customer['package_name'] or "No active package",
-                "data": f"{customer['data_remaining_mb'] // 1024}GB" if customer['data_remaining_mb'] else "0GB",
+                "type": subscription.get('package_name', 'No active package') if subscription else "No active package",
+                "data": f"{balance.get('data_remaining_mb', 0) // 1024}GB" if balance else "0GB",
                 "days_remaining": days_remaining,
-                "price_paid": f"{customer['price_try']} TRY" if customer['price_try'] else "N/A"
-            } if customer['package_name'] else None
+                "price_paid": f"{subscription.get('price_try', 0)} TRY" if subscription else "N/A"
+            } if subscription else None,
+            "subscription_id": subscription.get('subscription_id') if subscription else None
         }
     else:
-        # Unknown customer - create a friendly default response
-        print(f"⚠️  Customer not found in database - using default")
+        # Unknown customer - detect language from country code
+        print(f"⚠️  Customer not found via API - using default")
         
-        # Try to detect language from phone number country code
-        language = 'EN'  # Default to English
+        language = 'EN'
         if phone_number.startswith('+90'):
-            language = 'TR'  # Turkish number
+            language = 'TR'
         elif phone_number.startswith('+49'):
-            language = 'DE'  # German
+            language = 'DE'
         elif phone_number.startswith('+7'):
-            language = 'RU'  # Russian
+            language = 'RU'
         elif phone_number.startswith('+966') or phone_number.startswith('+971'):
-            language = 'AR'  # Arabic (Saudi/UAE)
+            language = 'AR'
         
         print(f"   Detected language from country code: {language}")
         
@@ -86,7 +102,8 @@ def get_customer_info(phone_number):
             "language": language,
             "package": None,
             "phone": phone_number,
-            "is_new_customer": True  # Flag for different greeting
+            "is_new_customer": True,
+            "subscription_id": None
         }
 
 
@@ -103,7 +120,7 @@ CUSTOMER INFORMATION:
 - Phone: {customer_info['phone']}
 """
     
-    if customer_info['package']:
+    if customer_info.get('package'):
         system_prompt += f"""- Current Package: {customer_info['package']['type']}
 - Data Remaining: {customer_info['package']['data']}
 - Days Remaining: {customer_info['package']['days_remaining']}
@@ -128,14 +145,15 @@ IMPORTANT: This is a VOICE call, so keep everything concise and clear.
     messages.append({"role": "user", "content": user_message})
     
     # Get AI response
-    response = client.responses.create(
-    model="gpt-4.1-mini",   # cheaper + fast + good for voice agents
-    input=messages,
-    temperature=0.7,
-    max_output_tokens=150
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=messages,
+        temperature=0.7,
+        max_tokens=150
     )
 
-    return response.output_text
+    return response.choices[0].message.content
+
 
 def handle_incoming_call():
     """Handle incoming phone call"""
@@ -149,7 +167,7 @@ def handle_incoming_call():
         print(f"   CallSid: {request.values.get('CallSid', 'N/A')}")
         print("="*60)
         
-        # Get customer info from database
+        # Get customer info via API
         customer = get_customer_info(caller)
         
         # Initialize conversation memory with session ID
@@ -157,12 +175,12 @@ def handle_incoming_call():
         if caller not in conversation_memory:
             conversation_memory[caller] = {
                 'session_id': session_id,
-                'messages': []
+                'messages': [],
+                'escalation_needed': False
             }
         
         # Different greetings for existing vs new customers
         if customer.get('is_new_customer'):
-            # New customer - generic greeting
             greetings = {
                 'TR': "Merhaba! Turkcell yapay zeka asistanına hoş geldiniz. Size nasıl yardımcı olabilirim?",
                 'AR': "مرحبا! مرحبا بك في مساعد Turkcell الذكي. كيف يمكنني مساعدتك؟",
@@ -171,7 +189,6 @@ def handle_incoming_call():
                 'EN': "Hello! Welcome to Turkcell's AI assistant. How can I help you today?"
             }
         else:
-            # Existing customer - personalized greeting
             greetings = {
                 'TR': f"Merhaba {customer['name']}! Ben Turkcell yapay zeka asistanıyım. Size nasıl yardımcı olabilirim?",
                 'AR': f"مرحبا {customer['name']}! أنا مساعد الذكاء الاصطناعي من Turkcell. كيف يمكنني مساعدتك؟",
@@ -181,7 +198,10 @@ def handle_incoming_call():
             }
         
         greeting = greetings.get(customer['language'], greetings['EN'])
+        voice = get_polly_voice(customer['language'], gender='female')
+        
         print(f"💬 Greeting ({customer['language']}): {greeting}")
+        print(f"🎤 Using voice: {voice}")
         
         # Gather speech input
         gather = Gather(
@@ -193,11 +213,9 @@ def handle_incoming_call():
             hints='internet, SIM card, data, package, price, help, slow, not working'
         )
         
-        gather.say(greeting, voice='Polly.Joanna')
+        gather.say(greeting, voice=voice)
         response.append(gather)
-        
-        # Fallback
-        response.say("I didn't hear anything. Please call again if you need help. Goodbye!")
+        response.say("I didn't hear anything. Please call again if you need help. Goodbye!", voice=voice)
         
         print("✅ Response generated successfully")
         return Response(str(response), mimetype='text/xml')
@@ -210,166 +228,153 @@ def handle_incoming_call():
         import traceback
         traceback.print_exc()
         
-        # Return a safe error message to caller
         response = VoiceResponse()
         response.say("We're sorry, but we're experiencing technical difficulties. Please try again later.", voice='Polly.Joanna')
         return Response(str(response), mimetype='text/xml')
 
-# def simple_ai_reply(user_text):
-#     client = get_openai_client()
-
-#     response = client.chat.completions.create(
-#         model="gpt-4",
-#         messages=[
-#             {"role": "system", "content": "You are a helpful Turkcell voice assistant. Keep answers under 2 sentences."},
-#             {"role": "user", "content": user_text}
-#         ],
-#         max_tokens=80
-#     )
-
-#     return response.choices[0].message.content
-
-# def handle_incoming_call():
-#     response = VoiceResponse()
-#     caller = request.values.get('From', '')
-
-#     customer = get_customer_info(caller)
-
-#     if customer.get("is_new_customer"):
-#         greeting = "Hello. Welcome to Turkcell AI assistant. How can I help you today?"
-#     else:
-#         greeting = f"Hello {customer['name']}. How can I help you today?"
-
-#     gather = Gather(
-#         input='speech',
-#         action='/voice/process',
-#         speech_timeout='auto'
-#     )
-
-#     gather.say(greeting)
-#     response.append(gather)
-
-#     return Response(str(response), mimetype='text/xml')
-
 
 def process_speech():
     """Process speech input and generate AI response"""
-    response = VoiceResponse()
-    caller = request.values.get('From', '')
-    speech_result = request.values.get('SpeechResult', '')
-    
-    print("="*60)
-    print(f"🎤 Caller: {caller}")
-    print(f"🗣️  Speech: '{speech_result}'")
-    print(f"📊 Confidence: {request.values.get('Confidence', 'N/A')}")
-    print("="*60)
-    
-    # Check for empty speech
-    if not speech_result or speech_result.strip() == '':
-        print("⚠️  Empty speech result - asking user to repeat")
-        response.say("I'm sorry, I didn't catch that. Could you please repeat?", voice='Polly.Joanna')
+    try:
+        response = VoiceResponse()
+        caller = request.values.get('From', '')
+        speech_result = request.values.get('SpeechResult', '')
         
-        gather = Gather(
-            input='speech',
-            action='/voice/process',
-            language='en-US',
-            speech_timeout='auto',
-            timeout=10
-        )
-        gather.say("What can I help you with?", voice='Polly.Joanna')
-        response.append(gather)
-        return Response(str(response), mimetype='text/xml')
-    
-    # Get customer info
-    customer = get_customer_info(caller)
-    
-    # Get conversation history
-    if caller not in conversation_memory:
-        conversation_memory[caller] = {
-            'session_id': str(uuid.uuid4()),
-            'messages': []
-        }
-    
-    # # Generate AI response
-    # ai_response = generate_ai_response(
-    #     customer,
-    #     speech_result,
-    #     conversation_memory[caller]['messages']
-    # )
-    
-    # print(f"🤖 AI: {ai_response}")
-
-    messages = conversation_memory[caller]["messages"]
-    messages.append({"role": "user", "content": speech_result})
-
-    ai_response = asyncio.run(
-        ai_client.ask(
-            messages,
-            customer_context=customer
-        )
-    )
-    
-    # Update conversation memory
-    conversation_memory[caller]['messages'].append({"role": "user", "content": speech_result})
-    conversation_memory[caller]['messages'].append({"role": "assistant", "content": ai_response})
-    
-    # Keep only last 10 exchanges
-    if len(conversation_memory[caller]['messages']) > 20:
-        conversation_memory[caller]['messages'] = conversation_memory[caller]['messages'][-20:]
-    
-    # # Log to database
-    # if customer['customer_id']:
-    #     log_interaction(
-    #         customer['customer_id'],
-    #         'VOICE',
-    #         speech_result,
-    #         ai_response,
-    #         session_id=conversation_memory[caller]['session_id']
-    #     )
-
-    # In process_speech(), update the logging section:
-
-    # Log to database (only if existing customer)
-    if customer.get('customer_id'):
-        print(f"💾 Logging to database...")
-        try:
-            log_interaction(
-                customer['customer_id'],
-                'VOICE',
-                speech_result,
-                ai_response,
-                session_id=conversation_memory[caller]['session_id']
+        print("="*60)
+        print(f"🎤 Caller: {caller}")
+        print(f"🗣️  Speech: '{speech_result}'")
+        print(f"📊 Confidence: {request.values.get('Confidence', 'N/A')}")
+        print("="*60)
+        
+        # Check for empty speech
+        if not speech_result or speech_result.strip() == '':
+            print("⚠️  Empty speech result - asking user to repeat")
+            
+            customer = get_customer_info(caller)
+            voice = get_polly_voice(customer['language'], gender='female')
+            
+            response.say("I'm sorry, I didn't catch that. Could you please repeat?", voice=voice)
+            
+            gather = Gather(
+                input='speech',
+                action='/voice/process',
+                language='en-US',
+                speech_timeout='auto',
+                timeout=10
             )
-            print(f"✅ Logged successfully")
-        except Exception as e:
-            print(f"⚠️  Failed to log: {e}")
-    else:
-        print(f"ℹ️  New customer - skipping database log")
-    
-    # Check for end keywords
-    end_keywords = ['goodbye', 'bye', 'thank you', 'thanks', 'that\'s all', 
-                    'hoşçakal', 'teşekkürler', 'شكرا', 'وداعا', 'danke', 'спасибо']
-    
-    should_end = any(keyword in speech_result.lower() for keyword in end_keywords)
-    
-    if should_end:
-        response.say(ai_response, voice='Polly.Joanna')
-        response.say("Thank you for calling Turkcell. Goodbye!", voice='Polly.Joanna')
-        response.hangup()
-    else:
-        # Continue conversation
-        gather = Gather(
-            input='speech',
-            action='/voice/process',
-            language='en-US',
-            speech_timeout='auto',
-            timeout=10
+            gather.say("What can I help you with?", voice=voice)
+            response.append(gather)
+            return Response(str(response), mimetype='text/xml')
+        
+        # Get customer info via API
+        customer = get_customer_info(caller)
+        voice = get_polly_voice(customer['language'], gender='female')
+        print(f"🎤 Using voice: {voice}")
+        
+        # Get conversation history
+        if caller not in conversation_memory:
+            conversation_memory[caller] = {
+                'session_id': str(uuid.uuid4()),
+                'messages': [],
+                'escalation_needed': False
+            }
+        
+        # Generate AI response using your intelligence client
+        messages = conversation_memory[caller]["messages"]
+        messages.append({"role": "user", "content": speech_result})
+        
+        ai_response = asyncio.run(
+            ai_client.ask(
+                messages,
+                customer_context=customer
+            )
         )
         
-        gather.say(ai_response, voice='Polly.Joanna')
-        response.append(gather)
+        print(f"🤖 AI Response: {ai_response}")
         
-        response.say("I didn't hear your response. Goodbye!", voice='Polly.Joanna')
-    
-    return Response(str(response), mimetype='text/xml')
-
+        # Update conversation memory
+        conversation_memory[caller]['messages'].append({"role": "user", "content": speech_result})
+        conversation_memory[caller]['messages'].append({"role": "assistant", "content": ai_response})
+        
+        # Keep only last 10 exchanges
+        if len(conversation_memory[caller]['messages']) > 20:
+            conversation_memory[caller]['messages'] = conversation_memory[caller]['messages'][-20:]
+        
+        # Log to API (only if existing customer)
+        if customer.get('customer_id'):
+            print(f"💾 Logging interaction via API...")
+            try:
+                log_interaction(
+                    customer['customer_id'],
+                    'VOICE',
+                    speech_result,
+                    ai_response,
+                    session_id=conversation_memory[caller]['session_id']
+                )
+                print(f"✅ Logged successfully via API")
+            except Exception as e:
+                print(f"⚠️  Failed to log via API: {e}")
+        else:
+            print(f"ℹ️  New customer - skipping API log")
+        
+        # Check for escalation keywords
+        escalation_keywords = ['speak to human', 'human agent', 'talk to person', 'representative', 
+                              'not helping', 'insanları konuş', 'temsilci']
+        
+        if any(keyword in speech_result.lower() for keyword in escalation_keywords):
+            conversation_memory[caller]['escalation_needed'] = True
+            
+            # Create support ticket via API
+            if customer.get('customer_id'):
+                ticket_data = {
+                    "customer_id": customer['customer_id'],
+                    "subscription_id": customer.get('subscription_id'),
+                    "issue_type": "ESCALATION_REQUESTED",
+                    "priority": "HIGH",
+                    "description": f"Customer requested human agent. Last message: {speech_result}",
+                    "ai_attempted_resolution": "\n".join([
+                        f"{m['role']}: {m['content']}" 
+                        for m in conversation_memory[caller]['messages'][-4:]
+                    ])
+                }
+                create_support_ticket(ticket_data)
+                print(f"🎫 Support ticket created for escalation")
+        
+        # Check for end keywords
+        end_keywords = ['goodbye', 'bye', 'thank you', 'thanks', 'that\'s all', 
+                        'hoşçakal', 'teşekkürler', 'شكرا', 'وداعا', 'danke', 'спасибо']
+        
+        should_end = any(keyword in speech_result.lower() for keyword in end_keywords)
+        
+        if should_end:
+            response.say(ai_response, voice=voice)
+            response.say("Thank you for calling Turkcell. Goodbye!", voice=voice)
+            response.hangup()
+        else:
+            # Continue conversation
+            gather = Gather(
+                input='speech',
+                action='/voice/process',
+                language='en-US',
+                speech_timeout='auto',
+                timeout=10
+            )
+            
+            gather.say(ai_response, voice=voice)
+            response.append(gather)
+            response.say("I didn't hear your response. Goodbye!", voice=voice)
+        
+        print("✅ Response completed successfully")
+        return Response(str(response), mimetype='text/xml')
+        
+    except Exception as e:
+        print("="*60)
+        print(f"❌ ERROR IN process_speech:")
+        print(f"   {e}")
+        print("="*60)
+        import traceback
+        traceback.print_exc()
+        
+        response = VoiceResponse()
+        response.say("We're sorry, an error occurred. Please try again.", voice='Polly.Joanna')
+        return Response(str(response), mimetype='text/xml')
