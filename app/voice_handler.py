@@ -522,6 +522,19 @@ def process_speech():
             customer['language'] = detected_language
         
         voice = get_polly_voice(customer['language'], gender='female')
+
+        # ===== ADD THIS: Immediate acknowledgment =====
+        acknowledgments = {
+            'EN': "Let me help you with that.",
+            'TR': "Size yardımcı olayım.",
+            'AR': "دعني أساعدك.",
+            'DE': "Ich helfe Ihnen gerne.",
+            'RU': "Позвольте мне помочь."
+        }
+        
+        response.say(acknowledgments.get(customer['language'], acknowledgments['EN']), voice=voice)
+        # ===== END ADD =====
+        
         print(f"🎤 Using voice: {voice} for language: {customer['language']}")
         
         # Get conversation history

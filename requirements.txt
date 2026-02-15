@@ -1,12 +1,15 @@
 # --- Web Server ---
 flask==3.0.0
 gunicorn==21.2.0
+flask-sock==0.7.0
+websockets==12.0
 
 # --- AI & Communications ---
 # CRITICAL FIX: Upgraded from 1.10.0 to 1.50.0+ to fix the 'proxies' error
 openai>=1.50.0
 twilio==8.11.0
 pydub==0.25.1
+elevenlabs
 
 # --- MCP (Model Context Protocol) ---
 fastmcp>=0.4.1
