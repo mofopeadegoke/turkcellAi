@@ -2,8 +2,8 @@
 .env
 add_Ayo_num.py
 fix_openai_client.py
-monitor_db.py
-seed_database.py
-test_connection.py
-test_api.py
-keep_alive.py
+# monitor_db.py
+# seed_database.py
+# test_connection.py
+# test_api.py
+# keep_alive.py
