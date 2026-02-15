@@ -82,27 +82,46 @@
 # print("✅ API integration tests complete!")
 
 
-# Test Customer Speed
-import time
-from app.database import get_customer_by_phone
+# # Test Customer Speed
+# import time
+# from app.database import get_customer_by_phone
 
-print("⏱️  Testing API Speed\n")
+# print("⏱️  Testing API Speed\n")
 
-test_numbers = [
-    "+905321000008",
-    "+905338856528"
+# test_numbers = [
+#     "+905321000008",
+#     "+905338856528"
+# ]
+
+# for phone in test_numbers:
+#     start = time.time()
+#     customer = get_customer_by_phone(phone)
+#     elapsed = time.time() - start
+    
+#     if customer:
+#         print(f"✅ {phone}: {elapsed:.2f}s - {customer.get('full_name', 'N/A')}")
+#     else:
+#         print(f"❌ {phone}: {elapsed:.2f}s - Not found")
+#     print()
+
+# print("\n🎯 Target: <1s per lookup")
+# print("⚠️  If >2s, your API or network is slow")
+
+#Test language detection
+from app.voice_handler import detect_language_from_speech
+
+test_phrases = [
+    "Hello, my internet is not working",
+    "Hi, I need help with my data package",
+    "Merhaba, internetim çalışmıyor",
+    "Paketim hakkında bilgi almak istiyorum",
+    "مرحبا، الإنترنت لا يعمل",
+    "Hallo, mein Internet funktioniert nicht",
 ]
 
-for phone in test_numbers:
-    start = time.time()
-    customer = get_customer_by_phone(phone)
-    elapsed = time.time() - start
-    
-    if customer:
-        print(f"✅ {phone}: {elapsed:.2f}s - {customer.get('full_name', 'N/A')}")
-    else:
-        print(f"❌ {phone}: {elapsed:.2f}s - Not found")
-    print()
+print("🧪 Testing Language Detection\n")
 
-print("\n🎯 Target: <1s per lookup")
-print("⚠️  If >2s, your API or network is slow")
+for phrase in test_phrases:
+    print(f"Input: \"{phrase}\"")
+    detected = detect_language_from_speech(phrase)
+    print(f"Detected: {detected}\n")

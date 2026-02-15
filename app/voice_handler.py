@@ -229,19 +229,17 @@ def handle_incoming_call():
             conversation_memory[caller] = {
                 'session_id': session_id,
                 'messages': [],
-                'escalation_needed': False
+                'escalation_needed': False,
+                'detected_language': None  # Will be set after first speech
             }
         
-        # Different greetings for existing vs new customers
+        # For initial greeting, use a MULTILINGUAL approach
+        # Let them speak first, then adapt
         if customer.get('is_new_customer'):
-            greetings = {
-                'TR': "Merhaba! Turkcell yapay zeka asistanına hoş geldiniz. Size nasıl yardımcı olabilirim?",
-                'AR': "مرحبا! مرحبا بك في مساعد Turkcell الذكي. كيف يمكنني مساعدتك؟",
-                'DE': "Hallo! Willkommen beim Turkcell KI-Assistenten. Wie kann ich Ihnen helfen?",
-                'RU': "Здравствуйте! Добро пожаловать в ИИ-помощник Turkcell. Чем могу помочь?",
-                'EN': "Hello! Welcome to Turkcell's AI assistant. How can I help you today?"
-            }
+            # Generic multilingual greeting
+            greeting = "Hello! Merhaba! مرحبا! I'm Turkcell's AI assistant. How can I help you?"
         else:
+            # Use customer's registered language for known customers
             greetings = {
                 'TR': f"Merhaba {customer['name']}! Ben Turkcell yapay zeka asistanıyım. Size nasıl yardımcı olabilirim?",
                 'AR': f"مرحبا {customer['name']}! أنا مساعد الذكاء الاصطناعي من Turkcell. كيف يمكنني مساعدتك؟",
@@ -249,18 +247,18 @@ def handle_incoming_call():
                 'RU': f"Здравствуйте {customer['name']}! Я ИИ-помощник Turkcell. Чем могу помочь?",
                 'EN': f"Hello {customer['name']}! I'm Turkcell's AI assistant. How can I help you today?"
             }
+            greeting = greetings.get(customer['language'], greetings['EN'])
         
-        greeting = greetings.get(customer['language'], greetings['EN'])
-        voice = get_polly_voice(customer['language'], gender='female')
+        voice = get_polly_voice(customer.get('language', 'EN'), gender='female')
         
-        print(f"💬 Greeting ({customer['language']}): {greeting}")
+        print(f"💬 Greeting: {greeting}")
         print(f"🎤 Using voice: {voice}")
         
         # Gather speech input
         gather = Gather(
             input='speech',
             action='/voice/process',
-            language='auto',
+            language='auto',  # Auto-detect
             speech_timeout='auto',
             timeout=10,
             hints='internet, SIM card, data, package, price, help, slow, not working'
@@ -285,6 +283,50 @@ def handle_incoming_call():
         response.say("We're sorry, but we're experiencing technical difficulties. Please try again later.", voice='Polly.Joanna')
         return Response(str(response), mimetype='text/xml')
 
+def detect_language_from_speech(text):
+    """
+    Detect language from the actual speech content
+    Uses simple keyword detection + AI fallback
+    """
+    text_lower = text.lower()
+    
+    # Quick language detection by common words
+    language_indicators = {
+        'EN': ['hello', 'hi', 'help', 'internet', 'data', 'package', 'problem', 'my', 'the', 'is', 'not', 'working'],
+        'TR': ['merhaba', 'yardım', 'paket', 'internet', 'benim', 'için', 'var', 'yok', 'nasıl', 'ne'],
+        'AR': ['مرحبا', 'مساعدة', 'الإنترنت', 'بيانات', 'باقة'],
+        'DE': ['hallo', 'hilfe', 'internet', 'daten', 'paket', 'mein', 'nicht'],
+        'RU': ['привет', 'помощь', 'интернет', 'пакет', 'мой']
+    }
+    
+    # Count matches for each language
+    scores = {}
+    for lang, indicators in language_indicators.items():
+        score = sum(1 for word in indicators if word in text_lower)
+        if score > 0:
+            scores[lang] = score
+    
+    # Return language with highest score
+    if scores:
+        detected = max(scores, key=scores.get)
+        print(f"   🌍 Language detected from speech: {detected} (confidence: {scores[detected]} words)")
+        return detected
+    
+    # Fallback: try to detect using character patterns
+    # English: mostly ASCII
+    # Turkish: has ğ, ı, ş, ç, ö, ü
+    # Arabic: has Arabic script
+    # etc.
+    
+    ascii_ratio = sum(1 for c in text if ord(c) < 128) / len(text) if text else 0
+    
+    if ascii_ratio > 0.9:  # Mostly ASCII - likely English
+        print(f"   🌍 Language detected: EN (ASCII ratio: {ascii_ratio:.2f})")
+        return 'EN'
+    
+    # Default fallback
+    print(f"   🌍 Language detection uncertain, defaulting to EN")
+    return 'EN'
 
 # def process_speech():
 #     """Process speech input and generate AI response"""
@@ -433,7 +475,7 @@ def handle_incoming_call():
 #         return Response(str(response), mimetype='text/xml')
 
 def process_speech():
-    """Process speech input and generate AI response (OPTIMIZED FOR SPEED)"""
+    """Process speech input and generate AI response (with language detection)"""
     import time
     total_start = time.time()
     
@@ -460,7 +502,7 @@ def process_speech():
             gather = Gather(
                 input='speech',
                 action='/voice/process',
-                language='auto',  # Auto-detect language
+                language='auto',
                 speech_timeout='auto',
                 timeout=10
             )
@@ -468,30 +510,38 @@ def process_speech():
             response.append(gather)
             return Response(str(response), mimetype='text/xml')
         
-        # Get customer info (fast - no subscriptions/balance lookup)
+        # Get customer info
         customer = get_customer_info(caller)
         
-        # TEMPORARY: Override to English for testing
-        # customer['language'] = 'EN'  # Uncomment to force English
+        # CRITICAL FIX: Detect language from actual speech, not phone number
+        detected_language = detect_language_from_speech(speech_result)
+        
+        # Override customer language with detected language
+        if detected_language != customer['language']:
+            print(f"   🔄 Overriding customer language {customer['language']} → {detected_language}")
+            customer['language'] = detected_language
         
         voice = get_polly_voice(customer['language'], gender='female')
-        print(f"🎤 Using voice: {voice}")
+        print(f"🎤 Using voice: {voice} for language: {customer['language']}")
         
         # Get conversation history
         if caller not in conversation_memory:
             conversation_memory[caller] = {
                 'session_id': str(uuid.uuid4()),
                 'messages': [],
-                'escalation_needed': False
+                'escalation_needed': False,
+                'detected_language': detected_language  # Store detected language
             }
+        else:
+            # Update detected language in session
+            conversation_memory[caller]['detected_language'] = detected_language
         
-        # Generate AI response (FAST - using gpt-3.5-turbo)
+        # Generate AI response
         messages = conversation_memory[caller]["messages"]
         messages.append({"role": "user", "content": speech_result})
         
         ai_start = time.time()
         
-        # Use your intelligence client OR simple GPT-3.5
         try:
             ai_response = asyncio.run(
                 ai_client.ask(
@@ -500,7 +550,7 @@ def process_speech():
                 )
             )
         except:
-            # Fallback to simple GPT-3.5
+            # Fallback to simple generation
             ai_response = generate_ai_response(customer, speech_result, messages[-4:])
         
         ai_elapsed = time.time() - ai_start
@@ -510,11 +560,11 @@ def process_speech():
         conversation_memory[caller]['messages'].append({"role": "user", "content": speech_result})
         conversation_memory[caller]['messages'].append({"role": "assistant", "content": ai_response})
         
-        # Keep only last 10 exchanges (20 messages)
+        # Keep only last 10 exchanges
         if len(conversation_memory[caller]['messages']) > 20:
             conversation_memory[caller]['messages'] = conversation_memory[caller]['messages'][-20:]
         
-        # Log to API (async, don't wait)
+        # Log to API (don't wait)
         if customer.get('customer_id'):
             try:
                 log_interaction(
@@ -542,7 +592,7 @@ def process_speech():
             gather = Gather(
                 input='speech',
                 action='/voice/process',
-                language='auto',  # Auto-detect language
+                language='auto',
                 speech_timeout='auto',
                 timeout=10
             )
