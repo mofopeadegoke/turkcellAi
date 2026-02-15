@@ -169,5 +169,96 @@ async def search_knowledge_base(query: str) -> str:
         except httpx.RequestError as e:
             return f"Knowledge base is currently unreachable: {str(e)}"
 
+
+@mcp.tool()
+async def get_active_subscriptions(customer_id: str) -> List[Dict[str, Any]]:
+    """
+    Fetches the list of active subscriptions for a customer.
+    
+    The API returns a wrapper object:
+    { "success": true, "subscriptions": [...] }
+    
+    This tool extracts JUST the list inside 'subscriptions'.
+    """
+    # Construct the full URL using the new base variable
+    endpoint = f"{TURKCELL_API_BASE}/api/v1/customers/{customer_id}/subscriptions"
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            # 1. Make the request
+            response = await client.get(endpoint, timeout=10.0)
+            response.raise_for_status()
+            
+            # 2. Parse JSON
+            data = response.json()
+            
+            # 3. Extract the list from the "subscriptions" key
+            # We ignore "success", "customer_name", etc. to save tokens.
+            if "subscriptions" in data and isinstance(data["subscriptions"], list):
+                return data["subscriptions"]
+            
+            # Fallback if the list is empty or key is missing
+            return []
+
+        except httpx.HTTPStatusError as e:
+            print(f"⚠️ API Error ({e.response.status_code}): {e}")
+            return []
+        except Exception as e:
+            print(f"⚠️ Unexpected Error: {e}")
+            return []
+
+
+
+@mcp.tool()
+async def run_smart_diagnostic(
+    subscription_id: str, 
+    issue_type: str = "INTERNET_ISSUES"
+) -> Dict[str, Any]:
+    """
+    Runs a comprehensive system check for a specific subscription.
+    
+    This tool automatically checks:
+    - Network status (outages)
+    - Device settings (roaming, data enabled)
+    - Account balance/limits
+    
+    Args:
+        subscription_id (str): The unique UUID of the subscription to check.
+        issue_type (str, optional): The category of the problem. Defaults to "INTERNET_ISSUES".
+                                    Only change this if the user specifically mentions "CALLS" or "SMS".
+
+    Returns:
+        dict: A diagnostic report containing 'recommended_solutions', 'device_status', 
+              and 'network_status'.
+    """
+    endpoint = f"{TURKCELL_API_BASE}/api/v1/troubleshooting/diagnose/{subscription_id}"
+    
+    # We pass the default or overridden issue_type
+    params = {"issue_type": issue_type}
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            # 10 second timeout for deep diagnosis
+            response = await client.get(endpoint, params=params, timeout=10.0)
+            response.raise_for_status()
+            
+            return response.json()
+
+        except httpx.HTTPStatusError as e:
+            print(f"⚠️ Diagnostic API Error ({e.response.status_code}): {e}")
+            return {
+                "success": False,
+                "error": f"Status {e.response.status_code}",
+                "message": "Diagnostic failed. Please escalate to human agent."
+            }
+        except Exception as e:
+            print(f"⚠️ Unexpected Error: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "message": "An unexpected error occurred during diagnostics."
+            }
+
+            
 if __name__ == "__main__":
     mcp.run()
