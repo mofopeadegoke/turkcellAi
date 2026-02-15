@@ -1,6 +1,7 @@
 from mcp.server.fastmcp import FastMCP
 import httpx
 from typing import Optional
+from typing import List, Dict, Any
 
 # Create an MCP server
 mcp = FastMCP("Turkcell AI MCP Server")
@@ -171,7 +172,7 @@ async def search_knowledge_base(query: str) -> str:
 
 
 @mcp.tool()
-async def get_active_subscriptions(customer_id: str) -> List[Dict[str, Any]]:
+async def get_active_subscriptions(customer_id: str) -> list[dict[str, Any]]:
     """
     Fetches the list of active subscriptions for a customer.
     
@@ -193,11 +194,9 @@ async def get_active_subscriptions(customer_id: str) -> List[Dict[str, Any]]:
             data = response.json()
             
             # 3. Extract the list from the "subscriptions" key
-            # We ignore "success", "customer_name", etc. to save tokens.
             if "subscriptions" in data and isinstance(data["subscriptions"], list):
                 return data["subscriptions"]
             
-            # Fallback if the list is empty or key is missing
             return []
 
         except httpx.HTTPStatusError as e:
@@ -206,7 +205,6 @@ async def get_active_subscriptions(customer_id: str) -> List[Dict[str, Any]]:
         except Exception as e:
             print(f"⚠️ Unexpected Error: {e}")
             return []
-
 
 
 @mcp.tool()
@@ -259,6 +257,49 @@ async def run_smart_diagnostic(
                 "message": "An unexpected error occurred during diagnostics."
             }
 
+
+
+@mcp.tool()
+async def get_device_technical_context(subscription_id: str) -> Dict[str, Any]:
+    """
+    Retrieves real-time technical details about the user's device.
+    
+    Use this tool to:
+    1. Tailor instructions to the specific OS (Android vs iOS).
+    2. Check critical settings: 'roaming_enabled', 'data_enabled', 'airplane_mode'.
+    3. Verify signal strength (e.g., -68 dBm is good, -110 dBm is poor).
+    4. confirm the device model (e.g., 'OnePlus 11').
+
+    Args:
+        subscription_id (str): The unique UUID of the subscription.
+
+    Returns:
+        dict: A flat dictionary containing 'device_model', 'os_type', 'roaming_enabled', etc.
+              Returns an error dict if the API call fails.
+    """
+    endpoint = f"{TURKCELL_API_BASE}/api/v1/troubleshooting/device/{subscription_id}"
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            # 10s timeout to ensure we get accurate real-time data
+            response = await client.get(endpoint, timeout=10.0)
+            response.raise_for_status()
             
+            return response.json()
+
+        except httpx.HTTPStatusError as e:
+            print(f"⚠️ Device Context API Error ({e.response.status_code}): {e}")
+            return {
+                "error": f"Status {e.response.status_code}",
+                "message": "Could not retrieve device details."
+            }
+        except Exception as e:
+            print(f"⚠️ Unexpected Error: {e}")
+            return {
+                "error": str(e),
+                "message": "An unexpected error occurred while fetching device context."
+            }
+
+
 if __name__ == "__main__":
     mcp.run()
