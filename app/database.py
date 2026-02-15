@@ -485,3 +485,34 @@ def check_network_issues(region=None):
         return get_network_status_by_region(region)
     else:
         return get_network_status()
+    
+# ==================== SUPPORT TICKETS ====================
+
+def create_support_ticket(ticket_data):
+    """
+    Create a support ticket
+    
+    Endpoint: POST /api/v1/support-tickets (if it exists)
+    
+    Args:
+        ticket_data (dict): {
+            "customer_id": "uuid",
+            "subscription_id": "uuid",
+            "issue_type": "ESCALATION_REQUESTED",
+            "priority": "HIGH",
+            "description": "Customer requested human agent",
+            "ai_attempted_resolution": "Previous conversation..."
+        }
+    """
+    print(f"🎫 API: Creating support ticket - {ticket_data.get('issue_type')}")
+    
+    # Try to create ticket - if endpoint doesn't exist, fail gracefully
+    result = _make_request('POST', '/api/v1/support-tickets', data=ticket_data)
+    
+    if result:
+        ticket_id = (result.get('data') or result).get('ticket_id')
+        print(f"✅ API: Ticket created with ID: {ticket_id}")
+        return result.get('data') or result
+    
+    print(f"ℹ️  API: Support ticket endpoint not available (skipping)")
+    return None

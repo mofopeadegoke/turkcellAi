@@ -8,7 +8,7 @@ print("\n" + "="*60 + "\n")
 
 # Test 1: Get customer by phone
 print("Test 1: Get customer by phone")
-customer = get_customer_by_phone("+905321000008")
+customer = get_customer_by_phone("+905338856528")
 if customer:
     print(f"✅ Customer found: {customer.get('full_name', 'N/A')}")
     print(f"   Customer ID: {customer.get('customer_id', 'N/A')}")
@@ -58,7 +58,7 @@ print("\n" + "="*60 + "\n")
 
 # Test 5: Get balance by phone
 print("Test 5: Get balance by phone")
-balance = get_balance_by_phone("+905321000008")
+balance = get_balance_by_phone("+905338856528")
 if balance:
     print(f"✅ Balance found")
     print(f"   Data remaining: {balance.get('data_remaining_mb', 0) // 1024}GB")
@@ -70,7 +70,7 @@ print("\n" + "="*60 + "\n")
 
 # Test 6: Get full customer profile
 print("Test 6: Get full customer profile")
-profile = get_full_customer_profile("+905321000008")
+profile = get_full_customer_profile("+905338856528")
 if profile:
     print(f"✅ Profile built for: {profile.get('full_name', 'N/A')}")
     print(f"   Has balance: {'Yes' if profile.get('balance') else 'No'}")
