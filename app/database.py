@@ -20,7 +20,7 @@ def _make_request(method, endpoint, data=None, params=None):
         headers['X-API-Key'] = API_KEY
     
     # Increase timeout for slow API (Render free tier can be slow)
-    TIMEOUT = 7
+    TIMEOUT = 3
     
     try:
         if method.upper() == 'GET':
