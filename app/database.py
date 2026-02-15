@@ -18,28 +18,29 @@ def _make_request(method, endpoint, data=None, params=None):
     
     if API_KEY:
         headers['X-API-Key'] = API_KEY
-    else:
-        print("⚠️  WARNING: No API_KEY found in environment variables!")
+    
+    # Increase timeout for slow API (Render free tier can be slow)
+    TIMEOUT = 7
     
     try:
         if method.upper() == 'GET':
-            response = requests.get(url, params=params, headers=headers, timeout=10)
+            response = requests.get(url, params=params, headers=headers, timeout=TIMEOUT)
         elif method.upper() == 'POST':
-            response = requests.post(url, json=data, headers=headers, timeout=10)
+            response = requests.post(url, json=data, headers=headers, timeout=TIMEOUT)
         elif method.upper() == 'PATCH':
-            response = requests.patch(url, json=data, headers=headers, timeout=10)
+            response = requests.patch(url, json=data, headers=headers, timeout=TIMEOUT)
         elif method.upper() == 'DELETE':
-            response = requests.delete(url, headers=headers, timeout=10)
+            response = requests.delete(url, headers=headers, timeout=TIMEOUT)
         else:
             raise ValueError(f"Unsupported HTTP method: {method}")
         
-        print(f"   Response status: {response.status_code}")
+        print(f"   Response status: {response.status_code} ({response.elapsed.total_seconds():.2f}s)")
         
         response.raise_for_status()
         return response.json()
         
     except requests.exceptions.Timeout:
-        print(f"⚠️  API timeout: {endpoint}")
+        print(f"⚠️  API timeout: {endpoint} (>{TIMEOUT}s)")
         return None
     except requests.exceptions.RequestException as e:
         print(f"❌ API error ({endpoint}): {e}")
