@@ -30,6 +30,8 @@ Instead of waiting on hold or navigating a website in an unfamiliar language, yo
 
 ---
 
+**Phone number for both voice calls and Whatsapp texts- +14235204948**
+
 ## 🏗️ Project Structure
 
 ```
